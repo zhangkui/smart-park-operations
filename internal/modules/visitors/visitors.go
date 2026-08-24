@@ -82,7 +82,9 @@ func (s *Service) Create(v Visitor) (Visitor, error) {
 		return v, err
 	}
 	saved := s.repo.Save(v)
-	s.audit("create", saved.ID)
+	if s.audit != nil {
+		s.audit("create", saved.ID)
+	}
 	return saved, nil
 }
 func (s *Service) Update(v Visitor) (Visitor, error) {
