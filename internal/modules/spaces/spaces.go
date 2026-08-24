@@ -3,9 +3,12 @@ package spaces
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zhangkui/smart-park-operations/internal/platform"
@@ -25,11 +28,20 @@ type SpaceBooking struct {
 }
 
 type Repository struct {
-	mu    sync.RWMutex
-	items map[string]SpaceBooking
+	mu       sync.RWMutex
+	items    map[string]SpaceBooking
+	sequence uint64
 }
 
 func NewRepository() *Repository { return &Repository{items: map[string]SpaceBooking{}} }
+
+// List returns a stable, complete snapshot of every booking.
+//
+// The slice is a fresh copy so callers cannot mutate internal storage through
+// the returned value. Entries are sorted by ID (with the monotonically
+// increasing CreatedAt as a tiebreaker) so concurrent List calls observe a
+// deterministic ordering for the same underlying state rather than the
+// randomized iteration order of the Go map.
 func (r *Repository) List() []SpaceBooking {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -37,6 +49,12 @@ func (r *Repository) List() []SpaceBooking {
 	for _, item := range r.items {
 		out = append(out, item)
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ID != out[j].ID {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
 	return out
 }
 func (r *Repository) Get(id string) (SpaceBooking, bool) {
@@ -50,14 +68,21 @@ func (r *Repository) Save(v SpaceBooking) SpaceBooking {
 	defer r.mu.Unlock()
 	now := time.Now().UTC()
 	if v.ID == "" {
-		v.ID = now.Format("20060102150405.000000000")
+		// A wall-clock timestamp alone is not unique: on platforms with
+		// coarse clock resolution many concurrent or back-to-back saves
+		// collapse onto the same nanosecond and overwrite each other in the
+		// map. Pair it with a process-wide monotonically increasing counter
+		// so every booking gets a distinct, orderable identifier.
+		seq := atomic.AddUint64(&r.sequence, 1)
+		v.ID = fmt.Sprintf("%s.%012d", now.Format("20060102150405.000000000"), seq)
 	}
 	if v.CreatedAt.IsZero() {
 		v.CreatedAt = now
 	}
 	v.UpdatedAt = now
-	r.items[v.ID] = v
-	return v
+	stored := v
+	r.items[v.ID] = stored
+	return stored
 }
 func (r *Repository) Delete(id string) bool {
 	r.mu.Lock()
