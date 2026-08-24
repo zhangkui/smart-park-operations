@@ -173,7 +173,7 @@ func (h *Handler) handleItem(w http.ResponseWriter, r *http.Request) {
 		v.ID = id
 		saved, err := h.service.Update(v)
 		if err != nil {
-			platform.JSON(w, 200, saved)
+			platform.JSON(w, 422, map[string]string{"error": err.Error()})
 			return
 		}
 		platform.JSON(w, 200, saved)
