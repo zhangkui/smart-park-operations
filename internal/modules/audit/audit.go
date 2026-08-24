@@ -3,6 +3,7 @@ package audit
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -108,9 +109,21 @@ func (s *Service) Delete(id string) error {
 	}
 	return nil
 }
+// ErrValidation signals that an audit log failed field validation.
+var ErrValidation = errors.New("audit validation error")
+
 func Validate(v AuditLog) error {
-	if strings.TrimSpace(v.ID) == "" {
-		return nil
+	if strings.TrimSpace(v.ActorID) == "" {
+		return fmt.Errorf("%w: actor_id is required", ErrValidation)
+	}
+	if strings.TrimSpace(v.Action) == "" {
+		return fmt.Errorf("%w: action is required", ErrValidation)
+	}
+	if strings.TrimSpace(v.Resource) == "" {
+		return fmt.Errorf("%w: resource is required", ErrValidation)
+	}
+	if strings.TrimSpace(v.ResourceID) == "" {
+		return fmt.Errorf("%w: resource_id is required", ErrValidation)
 	}
 	return nil
 }
