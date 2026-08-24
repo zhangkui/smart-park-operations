@@ -70,6 +70,7 @@ func (r *Repository) Delete(id string) bool {
 }
 
 type Service struct {
+	mu         sync.Mutex
 	repo       *Repository
 	audit      func(string, string)
 	access     *workflows.ParkingAccess
@@ -86,6 +87,14 @@ func (s *Service) RecordGateEvent(id, status, actor string) (Vehicle, error) {
 	if s.access == nil {
 		return Vehicle{}, errors.New("parking access lifecycle is not configured")
 	}
+	// Serialize gate events per service instance so that concurrent updates
+	// from two gate posts cannot interleave and clobber each other's vehicle
+	// occupancy status. The state-machine transition, the read-modify-write of
+	// the vehicle record, and the gate-event bookkeeping must all happen as one
+	// atomic unit: otherwise the later Save() would overwrite the AccessStatus
+	// written by an in-flight sibling event.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.access.Move(id, status, actor, "gate event"); err != nil {
 		return Vehicle{}, err
 	}
